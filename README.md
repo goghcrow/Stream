@@ -6,7 +6,9 @@
 
 [比如这个lazy](https://github.com/goghcrow/lazy)
 
-比如项目.givingup文件夹内的文件~
+[比如这个](https://github.com/goghcrow/Stream/tree/master/.givingup)
+
+比如....
 
 后来看到[nikic大神的iter项目](https://github.com/nikic/iter.git)，然后终于妥协了~
 

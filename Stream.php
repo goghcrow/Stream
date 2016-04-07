@@ -1,321 +1,305 @@
 <?php
-/**
- * User: 乌鸦
- * Date: 2016/4/3
- * Time: 22:05
- */
-
 namespace xiaofeng;
-error_reporting(E_ALL);
+require_once __DIR__ . "/iter/src/bootstrap.php";
+use \iter;
 
-
+/**
+ * Class Stream
+ * @package xiaofeng
+ * @author xiaofeng
+ *
+ * 第n版决定站在巨人的肩膀上~~(●'◡'●)不造轮子了
+ * 其实可以用魔术方法__call做代理~ 但是不够直观
+ * 且对IDE也不够友好(虽然可以加@method ~)
+ */
 class Stream
 {
-    const OP_MAP = 1;
-    const OP_FILTER = 2;
-    const OP_REDUCE = 3;
-    const OP_FINDFIRST = 4;
-    const OP_ANY_MATCH = 5;
-    const OP_ALL_MATCH = 6;
-
-    public $debug = false;
     private $opQueue = [];
-    private $source = null;
-    private $end = false;
+    private $iterable = null;
+    private $isClosed = false;
+    private $isDebug = false;
 
-    private $limit = null;
-    private $distinct = null;
-
-    public static function of($source) {
-        $stream = null;
-        if($source instanceof \Closure) {
-            $source = $source();
+    public static function of($iterable) {
+        if($iterable instanceof \Closure) {
+            $iterable = $iterable();
         }
-        if(is_array($source)) {
-            $stream = new static($source);
-        } else if(is_object($source) && $source instanceof \Generator) {
-            $stream = new static($source);
-        } else if(is_object($source) && $source instanceof \Traversable) {
-            $stream = new static($source);
-        } else {
-            throw new \InvalidArgumentException("source must be travel");
-        }
-
-        return $stream;
+        iter\_assertIterable($iterable, "First Argument");
+        return new static($iterable);
     }
 
-    private function __construct($source) {
-        $this->source = $source;
+    public static function from(/* ...$iterables */) {
+        $iterables = func_get_args();
+        iter\_assertAllIterable($iterables);
+        return new static($iterables);
+    }
+
+    public static function range($start, $end, $step = null) {
+        return self::of(iter\range($start, $end, $step));
+    }
+
+    public static function repeat($value, $num = INF) {
+        return self::of(iter\repeat($value, $num));
+    }
+
+    private function __construct($iterable) {
+        $this->iterable = $iterable;
     }
 
     private function checkAndSetEnd($end = false) {
-        if($this->end === true) {
-            throw new \LogicException("stream has end");
+        if($this->isClosed === true) {
+            throw new \Exception("Cannot traverse an already closed stream");
         }
-        $this->end = $end;
+        $this->isClosed = $end;
     }
 
-    public static function emptygen() {
-        if(false) {
-            yield;
+    private function _peek(callable $userfn, $iterable) {
+        iter\_assertIterable($iterable, 'Second argument');
+        foreach ($iterable as $key => $value) {
+            $userfn($value, $key);
+            yield $key => $value;
         }
     }
 
-    public function debug() {
-        $this->debug = true;
+    public function debug($isDebug = true) {
+        $this->isDebug = $isDebug;
+        return $this;
+    }
+
+    public function peek(callable $peeker) {
+        $this->checkAndSetEnd();
+        if($this->isDebug) {
+            $this->opQueue[] = [[$this, "_peek"], $peeker, null];
+        }
         return $this;
     }
 
     public function map(callable $mapper) {
         $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_MAP, $mapper];
+        $this->opQueue[] = ["iter\\map", $mapper, null];
         return $this;
     }
 
-    public function flatmap(callable $flatmapper) {
-        // fixme
-    }
-
-    public function filter(callable $filter) {
+    public function mapKeys(callable $mapKeyser) {
         $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_FILTER, $filter];
+        $this->opQueue[] = ["iter\\mapKeys", $mapKeyser, null];
         return $this;
     }
 
-    // 只distinct数据的value,保留key第一次出现的元素
-    public function distinct($strict = false) {
+    public function reindex(callable $reindexer) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\reindex", $reindexer, null];
+        return $this;
+    }
+
+    public function apply(callable $applyer) {
         $this->checkAndSetEnd(true);
-        $this->distinct = $strict;
-        return $this;
+        $this->opQueue[] = ["iter\\apply", $applyer, null];
     }
 
-    public function limit($n) {
+    public function filter(callable $predicate) {
         $this->checkAndSetEnd();
-        if($n >= 0) {
-            $this->limit = $n;
-        }
+        $this->opQueue[] = ["iter\\filter", $predicate, null];
         return $this;
     }
-
-    public function sort(callable $peeker) {
-        // fixme
-    }
-
-    // 以下为结果状态
 
     public function reduce(callable $reducer, $initial = null) {
-        $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_REDUCE, $reducer];
-        return $this->exevaluate($initial)->current();
-    }
-
-    public function findFirst(callable $predicate) {
-        $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_FINDFIRST, $predicate];
-        return $this->exevaluate([null/*k*/, null/*v*/])->current();
-    }
-
-    public function anyMatch(callable $predicate) {
-        $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_ANY_MATCH, $predicate];
-        return $this->exevaluate(false)->current();
-    }
-
-    public function allMatch(callable $predicate) {
-        $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_ALL_MATCH, $predicate];
-        return $this->exevaluate(true)->current();
-    }
-
-    public function sum() {
-        $this->checkAndSetEnd();
-        $this->opQueue[] = [self::OP_REDUCE, function($carry, $v) {
-            return $carry + $v;
-        }];
-        return $this->exevaluate(0)->current();
-    }
-
-    public function collect() {
         $this->checkAndSetEnd(true);
-        return $this->exevaluate();
+        $this->opQueue[] = ["iter\\reduce", $reducer, $initial];
+        return $this->execute();
     }
 
-    private function _limit(\Generator $gen) {
-        if($this->limit > 0) {
-            foreach($gen as $k => $v) {
-                if(--$this->limit < 0) {
-                    break;
-                }
-                yield $k => $v;
-            }
-        }
+    public function reductions(callable $reductionser, $initial = null) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\reductions", $reductionser, $initial];
+        return $this;
     }
 
-    private function varhash($var, $strict = false) {
-        if($strict) {
-            return md5(serialize($var));
-        }
-        // is_*函数速度要比gettype快
-        switch($strict) {
-            case is_bool($var):
-                return "b" . $var;
-                break;
-            case is_int($var):
-                break;
-            case is_float($var):
-                break;
-            case is_string($var):
-                break;
-            case is_array($var):
-                break;
-            case is_object($var):
-                break;
-            case is_resource($var):
-                break;
-            case is_null($var):
-                break;
-            default:
-        }
+    private function _zip($iterable, array $iterables) {
+        array_unshift($iterables, $iterable);
+        // return iter\zip(...$iterable);
+        return call_user_func_array("iter\\zip", $iterables);
     }
 
-    private function _distinct(\Generator $gen, $strict = false) {
-        $hashset = [];
-//        in_array()
-
-        foreach($gen as $k => $v) {
-            if($strict) {
-                $hashset[] = null;
-            }
-            switch($strict) {
-                case is_bool($v):
-                    break;
-                case is_int($v):
-                    break;
-                case is_float($v):
-                    break;
-                case is_string($v):
-                    break;
-                case is_array($v):
-                    break;
-                case is_object($v):
-                    break;
-                case is_resource($v):
-                    break;
-                case is_null($v):
-            }
-            switch(!$strict) {
-                case is_bool($v):
-                    break;
-                case is_int($v):
-                    break;
-                case is_float($v):
-                    break;
-                case is_string($v):
-                    break;
-                case is_array($v):
-                    break;
-                case is_object($v):
-                    break;
-                case is_resource($v):
-                    break;
-                case is_null($v):
-            }
-
-        }
+    public function zip(/* ...$iterables */) {
+        $this->checkAndSetEnd();
+        $iterables = func_get_args();
+        $this->opQueue[] = [[$this, "_zip"], null, $iterables];
+        return $this;
     }
 
-    private function exevaluate($toReturn = null) {
-        $gen = $this->evaluate($toReturn);
-        if($this->distinct !== null) {
-            $gen = $this->_distinct($gen, $this->distinct);
-        }
-        if($this->limit !== null) {
-            $gen = $this->_limit($gen);
-        }
-        return $gen;
+    public function _zipKey($iterable, $keys) {
+        return iter\zipKeyValue($keys, $iterable);
     }
 
-    /**
-     * @param null $toReturn 需要返回的初始值
-     * @return \Generator 需要直接返回的话：
-     * 需要直接返回的话：
-     * 1. 标记isReturn = true
-     * 2. 跳转到switch foreach foreach 外: break 3
-     * 3. 获取生成器第一个元素: return $this->evaluate()->current()
-     */
-    private function evaluate($toReturn = null) {
-        if($this->debug) echo PHP_EOL,str_repeat("=", 50),PHP_EOL,PHP_EOL;
-        $isReturn = false;
-        foreach($this->source as $k => $v) {
-            foreach($this->opQueue as $opk => list($type, $op)) {
-                switch($type) {
-
-                    case self::OP_MAP:
-                        if($this->debug) echo print_r($v,true)," map to ",$op($v, $k),PHP_EOL;
-                        $v = $op($v, $k);
-                        break;
-
-                    case self::OP_FILTER:
-                        if($op($v, $k)) {
-                            if($this->debug) echo print_r($v,true)," filter true",PHP_EOL;
-                        } else {
-                            if($this->debug) echo print_r($v,true)," filter false",PHP_EOL;
-                            goto lab_continue;
-                        }
-                        break;
-
-                    case self::OP_REDUCE:
-                        $isReturn = true;
-                        $toReturn = $op($toReturn, $v, $k);
-                        if($this->debug) echo print_r($v,true)," reduce ",$toReturn,PHP_EOL;
-                        $this->opQueue[$opk][2] = $toReturn;
-                        break;
-
-                    case self::OP_FINDFIRST:
-                        $isReturn = true;
-                        if($op($v, $k)) {
-                            $toReturn = [$k, $v];
-                            if($this->debug) echo print_r($v,true)," findfirst true ","[{$toReturn[0]},{$toReturn[1]}]",PHP_EOL;
-                            break 3;
-                        }
-                        if($this->debug) echo print_r($v,true)," findfirst false ","[{$toReturn[0]},{$toReturn[1]}]",PHP_EOL;
-                        break;
-
-                    case self::OP_ANY_MATCH:
-                        $isReturn = true;
-                        if($op($v, $k)) {
-                            $toReturn = true;
-                            if($this->debug) echo print_r($v,true)," anymatch true ",$toReturn,PHP_EOL;
-                            break 3;
-                        }
-                        if($this->debug) echo print_r($v,true)," anymatch false ",$toReturn,PHP_EOL;
-                        break;
-
-                    case self::OP_ALL_MATCH:
-                        $isReturn = true;
-                        if(!$op($v, $k)) {
-                            $toReturn = false;
-                            if($this->debug) echo print_r($v,true)," allmatch true ",$toReturn,PHP_EOL;
-                            break 3;
-                        }
-                        if($this->debug) echo print_r($v,true)," allmatch true ",$toReturn,PHP_EOL;
-                        break;
-
-                    default:
-                        throw new \RuntimeException("op type error");
-                }
-            }
-
-            if(!$isReturn) {
-                yield $k => $v;
-            }
-
-            lab_continue:
-        }
-
-        if($this->debug) echo PHP_EOL,str_repeat("=", 50),PHP_EOL,PHP_EOL;
-        if($isReturn) {
-            yield $toReturn;
-        }
+    public function zipKey($keys) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = [[$this, "_zipKey"], null, $keys];
+        return $this;
     }
+
+    public function _zipValue($iterable, $values) {
+        return iter\zipKeyValue($iterable, $values);
+    }
+
+    public function zipValue($values) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = [[$this, "_zipValue"], null, $values];
+        return $this;
+    }
+
+    private function _chain($iterable, array $iterables) {
+        array_unshift($iterables, $iterable);
+        // return iter\chain(...$iterable);
+        return call_user_func_array("iter\\chain", $iterables);
+    }
+
+    public function chain(/* ...$iterables */) {
+        $this->checkAndSetEnd();
+        $iterables = func_get_args();
+        $this->opQueue[] = [[$this, "_chain"], null, $iterables];
+        return $this;
+    }
+
+    private function _product($iterable, array $iterables) {
+        array_unshift($iterables, $iterable);
+        // return iter\product(...$iterable);
+        return call_user_func_array("iter\\product", $iterables);
+    }
+
+    public function product(/* ...$iterables */) {
+        $this->checkAndSetEnd();
+        $iterables = func_get_args();
+        $this->opQueue[] = [[$this, "_product"], null, $iterables];
+        return $this;
+    }
+
+    private function _slice($iterable, array $args) {
+        list($start, $length) = $args;
+        return iter\slice($iterable, $start, $length);
+    }
+
+    public function slice($start, $length = INF) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = [[$this, "_slice"], null, [$start, $length]];
+        return $this;
+    }
+
+    public function take($num) {
+        return $this->slice(0, $num);
+    }
+
+    public function drop($num) {
+        return $this->slice($num);
+    }
+
+    public function keys() {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\keys", null, null];
+        return $this;
+    }
+
+    public function values() {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\values", null, null];
+        return $this;
+    }
+
+    public function any(callable $predicate) {
+        $this->checkAndSetEnd(true);
+        $this->opQueue[] = ["iter\\any", $predicate, null];
+        return $this->execute();
+    }
+
+    public function all(callable $predicate) {
+        $this->checkAndSetEnd(true);
+        $this->opQueue[] = ["iter\\all", $predicate, null];
+        return $this->execute();
+    }
+    
+    public function findFirst(callable $predicate) {
+        $this->checkAndSetEnd(true);
+        $this->opQueue[] = ["iter\\search", $predicate, null];
+        return $this->execute();
+    }
+
+    public function takeWhile(callable $predicate) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\takeWhile", $predicate, null];
+        return $this;
+    }
+
+    public function dropWhile(callable $predicate) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\dropWhile", $predicate, null];
+        return $this;
+    }
+
+    public function flatten() {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\flatten", null, null];
+        return $this;
+    }
+
+    public function flatMap(callable $predicate) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\flatten", null, null];
+        $this->opQueue[] = ["iter\\map", $predicate, null];
+        return $this;
+    }
+
+    public function flip() {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\flip", null, null];
+        return $this;
+    }
+
+    public function chunk($size) {
+        $this->checkAndSetEnd();
+        $this->opQueue[] = ["iter\\chunk", null, $size];
+        return $this;
+    }
+
+    private function _join($iterable, $separator) {
+        return iter\join($separator, $iterable);
+    }
+
+    public function join($separator = "") {
+        $this->checkAndSetEnd(true);
+        $this->opQueue[] = [[$this, "_join"], null, $separator];
+        return $this->execute();
+    }
+
+    public function count() {
+        $this->checkAndSetEnd(true);
+        $this->opQueue[] = ["iter\\count", null, null];
+        return $this->execute();
+    }
+
+    public function toIter() {
+        $this->checkAndSetEnd(true);
+        return iter\toIter($this->execute());
+    }
+
+    public function toArray() {
+        $this->checkAndSetEnd(true);
+        return iter\toArray($this->execute());
+    }
+
+    public function toArrayWithKeys() {
+        $this->checkAndSetEnd(true);
+        return iter\toArrayWithKeys($this->execute());
+    }
+
+    private function execute() {
+        $iterable = $this->iterable;
+        foreach ($this->opQueue as list($iterfn, $userfn, $arg)) {
+            if($userfn == null) {
+                $iterable = $iterfn($iterable, $arg);
+            } else {
+                $iterable = $iterfn($userfn, $iterable, $arg);
+            }
+        }
+        return $iterable;
+    }
+
 }

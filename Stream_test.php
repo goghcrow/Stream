@@ -16,27 +16,42 @@ $pp = function($v, $k) {
     echo "[$k=>$v] -> ", PHP_EOL;
 };
 $debug = false;
+$var_dump_iter = Stream::create()->apply(function($v) { var_dump($v); });
+
 
 assert(Stream::range(1, 3)
         ->mapKeys(function($v) { return chr(ord('a') + $v); })
         ->keys()
-        ->toArrayWithKeys()
+        ->toArray()
     ===
     ["a","b","c"]
 );
+
+$iter_to_alpha = Stream::create()
+    ->map(function($v) { return chr(ord('a') + $v); })
+    ->toArray();
+assert($iter_to_alpha(iter\range(0, 2)) === ['a', 'b', 'c']);
 
 assert(
     Stream::range(1, 10)
         ->reduce(iter\fn\operator("+"), 100)
     ===
-    (Stream::range(1, 10)
-            ->reduce(iter\fn\operator("+"), 0) + 100)
+    Stream::range(1, 10)
+            ->reduce(iter\fn\operator("+"), 0)
+    + 100
 );
+
+$iter_sum = Stream::create()->reduce(iter\fn\operator("+"), 0);
+assert($iter_sum(iter\range(1, 100)) === 5050);
 
 assert(
     Stream::range(1, 10)
         ->all("is_int")
 );
+
+$iter_all_int = Stream::create()->all("is_int");
+assert($iter_all_int([1,2,3]));
+assert($iter_all_int([1, "a"]) === false);
 
 assert(
     Stream::range(1, 10)
@@ -46,6 +61,11 @@ assert(
         ->any("is_int")
     === false
 );
+
+$iter_any_int = Stream::create()->any("is_int");
+assert($iter_any_int(["a", "b", 1]));
+assert($iter_any_int(["a", "b"]) === false);
+
 
 assert(
     Stream::of([1,2,3,"str"])
@@ -66,6 +86,9 @@ assert(
         ->findFirst(function($v) { return $v === 5;})
     === 5
 );
+
+$iter_find_first = Stream::create()->findFirst(function($v) { return $v === 5; });
+assert($iter_find_first(iter\range(1, 10)) === 5);
 
 assert(
     Stream::from(
@@ -181,3 +204,22 @@ assert(
         ->zipKey(range("a", "c"))
         ->toArrayWithKeys()
 );
+
+$iter_even_sum = Stream::create()
+    ->filter($isEven)
+    ->reduce(iter\fn\operator("+"));
+assert($iter_even_sum([1,2,4,5,7,8]) === 14);
+
+$city_list = [
+    ["id" => 1, "city" => "beijing", "score" => 1.1],
+    ["id" => 2, "city" => "shanghai", "score" => 2.3],
+    ["id" => 3, "city" => "chengdu", "score" => 3.1],
+    ["id" => 4, "city" => "tianjin", "score" => 0.5]
+];
+
+$iter_index_city = Stream::create()
+    // ->filter(function($a) { return $a["score"] > 1; })
+    ->map(iter\fn\index("city"))
+    ->toArray();
+
+// $var_dump_iter($iter_index_city($city_list));

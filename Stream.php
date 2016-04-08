@@ -41,6 +41,10 @@ class Stream
         return self::of(iter\repeat($value, $num));
     }
 
+    public static function create() {
+        return new static(null);
+    }
+
     private function __construct($iterable) {
         $this->iterable = $iterable;
     }
@@ -94,6 +98,9 @@ class Stream
     public function apply(callable $applyer) {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\apply", $applyer, null];
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
 
     public function filter(callable $predicate) {
@@ -105,7 +112,9 @@ class Stream
     public function reduce(callable $reducer, $initial = null) {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\reduce", $reducer, $initial];
-        return $this->execute();
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
 
     public function reductions(callable $reductionser, $initial = null) {
@@ -127,7 +136,7 @@ class Stream
         return $this;
     }
 
-    public function _zipKey($iterable, $keys) {
+    private function _zipKey($iterable, $keys) {
         return iter\zipKeyValue($keys, $iterable);
     }
 
@@ -207,19 +216,25 @@ class Stream
     public function any(callable $predicate) {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\any", $predicate, null];
-        return $this->execute();
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
 
     public function all(callable $predicate) {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\all", $predicate, null];
-        return $this->execute();
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
     
     public function findFirst(callable $predicate) {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\search", $predicate, null];
-        return $this->execute();
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
 
     public function takeWhile(callable $predicate) {
@@ -266,31 +281,41 @@ class Stream
     public function join($separator = "") {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = [[$this, "_join"], null, $separator];
-        return $this->execute();
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
 
     public function count() {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\count", null, null];
-        return $this->execute();
+        return $this->_then(function() {
+            return $this->_execute();
+        });
     }
 
     public function toIter() {
         $this->checkAndSetEnd(true);
-        return iter\toIter($this->execute());
+        return $this->_then(function() {
+            return iter\toIter($this->_execute());
+        });
     }
 
     public function toArray() {
         $this->checkAndSetEnd(true);
-        return iter\toArray($this->execute());
+        return $this->_then(function() {
+            return iter\toArray($this->_execute());
+        });
     }
 
     public function toArrayWithKeys() {
         $this->checkAndSetEnd(true);
-        return iter\toArrayWithKeys($this->execute());
+        return $this->_then(function() {
+            return iter\toArrayWithKeys($this->_execute());
+        });
     }
 
-    private function execute() {
+    private function _execute() {
         $iterable = $this->iterable;
         foreach ($this->opQueue as list($iterfn, $userfn, $arg)) {
             if($userfn == null) {
@@ -302,4 +327,21 @@ class Stream
         return $iterable;
     }
 
+    private function _then(\Closure $fn) {
+        if($this->iterable === null) {
+            return $this->_build(function() use($fn) {
+                return $fn();
+            });
+        } else {
+            return $fn();
+        }
+    }
+
+    private function _build(\Closure $fn) {
+        return function($iterable) use($fn) {
+            iter\_assertIterable($iterable, "First Argument");
+            $this->iterable = $iterable;
+            return $fn();
+        };
+    }
 }

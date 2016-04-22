@@ -3,8 +3,9 @@
  * Date: 2016/4/3
  * Time: 22:05
  */
-use \xiaofeng\Stream;
-require "Stream.php";
+namespace xiaofeng;
+require __DIR__ . "/Stream.php";
+use iter;
 error_reporting(E_ALL);
 
 $add1 = function($a) { return $a + 1; };
@@ -15,7 +16,6 @@ $isOdd = function($a) { return $a % 2 !== 0; };
 $pp = function($v, $k) {
     echo "[$k=>$v] -> ", PHP_EOL;
 };
-$debug = false;
 $var_dump_iter = Stream::create()->apply(function($v) { var_dump($v); });
 
 
@@ -55,9 +55,8 @@ assert($iter_all_int([1, "a"]) === false);
 
 assert(
     Stream::range(1, 10)
-        ->debug($debug)
         ->map(function($v) { return "#$v"; })
-        ->peek($pp)
+        // ->peek($pp)
         ->any("is_int")
     === false
 );
@@ -81,8 +80,7 @@ assert(
 
 assert(
     Stream::range(1, 10)
-        ->debug($debug)
-        ->peek($pp)
+        // ->peek($pp)
         ->findFirst(function($v) { return $v === 5;})
     === 5
 );
@@ -101,6 +99,33 @@ assert(
     ===
     Stream::range(1, 10)
         ->toArray()
+);
+
+assert(
+    Stream::from(
+        [1],
+        [2,3, [4, [5]]]
+    )->flatten(1)->toArray()
+    ===
+    [1,2,3,[4,[5]]]
+);
+
+assert(
+    Stream::from(
+        [1],
+        [2,3, [4, [5]]]
+    )->flatten(2)->toArray()
+    ===
+    [1,2,3, 4, [5]]
+);
+
+assert(
+    Stream::from(
+        [1],
+        [2,3, [4, [5]]]
+    )->flatten(3)->toArray()
+    ===
+    [1,2,3,4,5]
 );
 
 assert(

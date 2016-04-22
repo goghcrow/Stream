@@ -1,7 +1,7 @@
 <?php
 namespace xiaofeng;
 require_once __DIR__ . "/iter/src/bootstrap.php";
-use \iter;
+use iter;
 
 /**
  * Class Stream
@@ -17,7 +17,6 @@ class Stream
     private $opQueue = [];
     private $iterable = null;
     private $isClosed = false;
-    private $isDebug = false;
 
     public static function of($iterable) {
         if($iterable instanceof \Closure) {
@@ -64,16 +63,9 @@ class Stream
         }
     }
 
-    public function debug($isDebug = true) {
-        $this->isDebug = $isDebug;
-        return $this;
-    }
-
     public function peek(callable $peeker) {
         $this->checkAndSetEnd();
-        if($this->isDebug) {
-            $this->opQueue[] = [[$this, "_peek"], $peeker, null];
-        }
+        $this->opQueue[] = [[$this, "_peek"], $peeker, null];
         return $this;
     }
 
@@ -107,6 +99,10 @@ class Stream
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\filter", $predicate, null];
         return $this;
+    }
+
+    public function where(callable $predicate) {
+        return $this->filter($predicate);
     }
 
     public function reduce(callable $reducer, $initial = null) {
@@ -228,7 +224,7 @@ class Stream
             return $this->_execute();
         });
     }
-    
+
     public function findFirst(callable $predicate) {
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\search", $predicate, null];
@@ -249,9 +245,31 @@ class Stream
         return $this;
     }
 
-    public function flatten() {
+    private function _flatten($iterable, $maxLevel, $level = 1) {
+        iter\_assertIterable($iterable, 'First argument');
+        foreach ($iterable as $value) {
+            if (iter\isIterable($value)) {
+                if($level > $maxLevel) {
+                    yield $value;
+                } else {
+                    foreach ($this->_flatten($value, $maxLevel, $level + 1) as $v) {
+                        yield $v;
+                    }
+                }
+            } else {
+                yield $value;
+            }
+        }
+    }
+
+    public function flatten($maxLevel = 0) {
         $this->checkAndSetEnd();
-        $this->opQueue[] = ["iter\\flatten", null, null];
+        if($maxLevel === 0) {
+            // recursion flatten
+            $this->opQueue[] = ["iter\\flatten", null, null];
+        } else {
+            $this->opQueue[] = [[$this, "_flatten"], null, $maxLevel];
+        }
         return $this;
     }
 

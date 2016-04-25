@@ -55,39 +55,46 @@ class Stream
         $this->isClosed = $end;
     }
 
-    private function _peek(callable $userfn, $iterable) {
+    private function _peek(/*callable */$userfn, $iterable) {
+        _assertCallable($userfn, "First Argument");
         iter\_assertIterable($iterable, 'Second argument');
         foreach ($iterable as $key => $value) {
-            $userfn($value, $key);
+            // $userfn($value, $key);
+            call_user_func($userfn, $value, $key);
             yield $key => $value;
         }
     }
 
-    public function peek(callable $peeker) {
+    public function peek(/*callable*/ $peeker) {
+        _assertCallable($peeker, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = [[$this, "_peek"], $peeker, null];
         return $this;
     }
 
-    public function map(callable $mapper) {
+    public function map(/*callable*/ $mapper) {
+        _assertCallable($mapper, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\map", $mapper, null];
         return $this;
     }
 
-    public function mapKeys(callable $mapKeyser) {
+    public function mapKeys(/*callable*/ $mapKeyser) {
+        _assertCallable($mapKeyser, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\mapKeys", $mapKeyser, null];
         return $this;
     }
 
-    public function reindex(callable $reindexer) {
+    public function reindex(/*callable*/ $reindexer) {
+        _assertCallable($reindexer, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\reindex", $reindexer, null];
         return $this;
     }
 
-    public function apply(callable $applyer) {
+    public function apply(/*callable*/ $applyer) {
+        _assertCallable($applyer, "First Argument");
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\apply", $applyer, null];
         return $this->_then(function() {
@@ -95,17 +102,20 @@ class Stream
         });
     }
 
-    public function filter(callable $predicate) {
+    public function filter(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\filter", $predicate, null];
         return $this;
     }
 
-    public function where(callable $predicate) {
+    public function where(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         return $this->filter($predicate);
     }
 
-    public function reduce(callable $reducer, $initial = null) {
+    public function reduce(/*callable*/ $reducer, $initial = null) {
+        _assertCallable($reducer, "First Argument");
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\reduce", $reducer, $initial];
         return $this->_then(function() {
@@ -113,7 +123,8 @@ class Stream
         });
     }
 
-    public function reductions(callable $reductionser, $initial = null) {
+    public function reductions(/*callable*/ $reductionser, $initial = null) {
+        _assertCallable($reductionser, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\reductions", $reductionser, $initial];
         return $this;
@@ -209,7 +220,8 @@ class Stream
         return $this;
     }
 
-    public function any(callable $predicate) {
+    public function any(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\any", $predicate, null];
         return $this->_then(function() {
@@ -217,7 +229,8 @@ class Stream
         });
     }
 
-    public function all(callable $predicate) {
+    public function all(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\all", $predicate, null];
         return $this->_then(function() {
@@ -225,7 +238,8 @@ class Stream
         });
     }
 
-    public function findFirst(callable $predicate) {
+    public function findFirst(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd(true);
         $this->opQueue[] = ["iter\\search", $predicate, null];
         return $this->_then(function() {
@@ -233,13 +247,15 @@ class Stream
         });
     }
 
-    public function takeWhile(callable $predicate) {
+    public function takeWhile(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\takeWhile", $predicate, null];
         return $this;
     }
 
-    public function dropWhile(callable $predicate) {
+    public function dropWhile(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\dropWhile", $predicate, null];
         return $this;
@@ -273,7 +289,8 @@ class Stream
         return $this;
     }
 
-    public function flatMap(callable $predicate) {
+    public function flatMap(/*callable*/ $predicate) {
+        _assertCallable($predicate, "First Argument");
         $this->checkAndSetEnd();
         $this->opQueue[] = ["iter\\flatten", null, null];
         $this->opQueue[] = ["iter\\map", $predicate, null];
@@ -361,5 +378,18 @@ class Stream
             $this->iterable = $iterable;
             return $fn();
         };
+    }
+}
+
+/**
+ * @internal
+ * @access private
+ * @param mixed $var
+ * @param string $what
+ * @throws \InvalidArgumentException
+ */
+function _assertCallable($var, $what) {
+    if(!is_callable($var)) {
+        throw new \InvalidArgumentException("$what should be callable");
     }
 }
